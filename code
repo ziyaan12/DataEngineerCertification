@@ -1,0 +1,134 @@
+import pandas as pd
+from typing import Tuple
+
+def merge_all_data(user_health_path: str,
+                  supplement_usage_path: str,
+                  experiments_path: str,
+                  user_profiles_path: str) -> pd.DataFrame:
+    """
+    Read, clean and merge the four datasets into a single DataFrame.
+
+    Output columns (in order):
+        user_id, date, email, user_age_group, experiment_name,
+        supplement_name, dosage_grams, is_placebo,
+        average_heart_rate, average_glucose, sleep_hours,
+        activity_level
+    """
+
+    # LOAD
+    health = pd.read_csv(user_health_path)
+    supp = pd.read_csv(supplement_usage_path)
+    exps = pd.read_csv(experiments_path)
+    prof = pd.read_csv(user_profiles_path)
+
+    # PARSE/ STANDARDISE DATES
+    for df in (health, supp):
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+    # EXPERIMENTS NAME ON SUPPLEMENT USAGE
+    exps = exps[["experiment_id", "name"]].rename(columns={"name": "experiment_name"})
+    supp = supp.merge(exps, on="experiment_id", how="left")
+
+    # DOSAGE TO GRAMS
+    supp = supp.copy()
+    supp["dosage"] = pd.to_numeric(supp.get("dosage"), errors="coerce")
+    
+    # convert first
+    unit = supp.get("dosage_unit")
+    if unit is not None:
+        unit = unit.astype(str).str.strip().str.lower()
+        supp["dosage_grams"] = supp["dosage"].where(unit.eq("g"), supp["dosage"] / 1000.0)
+        supp.loc[~unit.isin(["g", "mg"]), "dosage_grams"] = pd.NA                 
+        
+        # ignore weird units
+    else:
+        supp["dosage_grams"] = supp["dosage"]
+
+    # COMBINE HEALTH AND SUPPLEMENT ROWS
+    merged = supp.merge(
+        health,
+        on=["user_id", "date"],
+        how="outer",
+        suffixes=("", "_health")
+    )
+
+    # ATTACH USER PROFILE INFO
+    prof = prof[["user_id", "email", "age"]]
+    merged = merged.merge(prof, on="user_id", how="left")
+
+    # AGE GROUP
+    def _age_group(age) -> str:
+        if pd.isna(age):
+            return "Unknown"
+        try:
+            a = int(age)
+        except Exception:
+            return "Unknown"
+        if a < 18:
+            return "Under 18"
+        if 18 <= a <= 25:
+            return "18-25"
+        if 26 <= a <= 35:
+            return "26-35"
+        if 36 <= a <= 45:
+            return "36-45"
+        if 46 <= a <= 55:
+            return "46-55"
+        if 56 <= a <= 65:
+            return "56-65"
+        return "Over 65"
+
+    merged["user_age_group"] = merged["age"].apply(_age_group)
+
+    # SUPPLEMENT NAME DEFAULT IF NO INTAKE
+    merged["supplement_name"] = merged["supplement_name"].fillna("No intake")
+
+    # SELECT AND ORDER COLUMNS PER SPEC
+    out_cols = [
+        "user_id",
+        "date",
+        "email",
+        "user_age_group",
+        "experiment_name",
+        "supplement_name",
+        "dosage_grams",
+        "is_placebo",
+        "average_heart_rate",
+        "average_glucose",
+        "sleep_hours",
+        "activity_level",
+    ]
+
+    # ENSURE ALL EXPECTED COLUMNS EXIST, EVEN IF MISSING
+    for c in out_cols:
+        if c not in merged.columns:
+            merged[c] = pd.NA
+
+    out = merged[out_cols].copy()
+
+    ### TIDY IT ALL UP
+    ## enforce the unique row definition: one per row
+    # if there are multiple supplements taken in a day then multiple rows permitted
+    out = out.sort_values(["user_id", "date", "supplement_name"], kind="stable").reset_index(drop=True)
+
+    # VALIDATE NON MISSING CONSTRAINTS
+    out["user_id"] = pd.to_numeric(out["user_id"], errors="coerce").astype("Int64")
+
+    return out
+
+# DISPLAY RESULTS
+if __name__ == "__main__":
+    try:
+        df = merge_all_data(
+            "user_health_data.csv",
+            "supplement_usage.csv",
+            "experiments.csv",
+            "user_profiles.csv"
+        )
+        print("Merge Successful")
+        print(f"Rows: {len(df)}, Columns: {len(df.columns)}")
+        display(df.head(10))
+    except Exception as e:
+        print("Error while running the function:")
+        import traceback
+        traceback.print_exc()
