@@ -16,17 +16,13 @@ def merge_all_data(user_health_path: str,
         activity_level
     """
 
-    # -----------------------------
     # LOAD THE DATASETS
-    # -----------------------------
     health = pd.read_csv(user_health_path)
     supp = pd.read_csv(supplement_usage_path)
     exps = pd.read_csv(experiments_path)
     prof = pd.read_csv(user_profiles_path)
 
-    # -----------------------------
     # CLEAN CATEGORICAL AND TEXT FIELDS
-    # -----------------------------
     # ensure all IDs are consistent strings
     for df in (health, supp, prof):
         df["user_id"] = df["user_id"].astype(str).str.strip()
@@ -69,9 +65,7 @@ def merge_all_data(user_health_path: str,
         .str.title()
     )
 
-    # -----------------------------
     # CONVERT DATA TYPES
-    # -----------------------------
     # convert date columns to datetime
     for df in (health, supp):
         df["date"] = pd.to_datetime(df["date"], errors="coerce")
@@ -112,9 +106,7 @@ def merge_all_data(user_health_path: str,
     if "is_placebo" in supp.columns:
         supp["is_placebo"] = supp["is_placebo"].apply(_to_bool)
 
-    # -----------------------------
     # MERGE ALL DATASETS
-    # -----------------------------
     supp = supp.merge(exps[["experiment_id", "experiment_name"]], on="experiment_id", how="left")
     merged = pd.merge(health, supp, on=["user_id", "date"], how="outer")
     merged = merged.merge(prof[["user_id", "email", "age"]], on="user_id", how="left")
@@ -152,10 +144,8 @@ def merge_all_data(user_health_path: str,
             .str.replace(r"\s+", " ", regex=True)
             .str.title()
         ).where(merged["experiment_name"].notna(), pd.NA)
-
-    # -----------------------------
+    
     # HANDLE MISSING VALUES
-    # -----------------------------
     # fill missing supplement names with "No intake"
     merged["supplement_name"] = (
         merged.get("supplement_name")
@@ -173,9 +163,7 @@ def merge_all_data(user_health_path: str,
     # drop rows missing key information
     merged = merged[merged["user_id"].notna() & merged["date"].notna() & merged["email"].notna()].copy()
 
-    # -----------------------------
     # FINAL OUTPUT TABLE
-    # -----------------------------
     out_cols = [
         "user_id",
         "date",
@@ -206,10 +194,7 @@ def merge_all_data(user_health_path: str,
 
     return out
 
-
-# -----------------------------
 # EXECUTION AND FILE EXPORT
-# -----------------------------
 if __name__ == "__main__":
     # run the main merge function
     df = merge_all_data(
